@@ -354,8 +354,7 @@ class _SpiFlashDevice(SerialFlash):
             s_start = (start+sector_size-1) & sector_mask
             s_end = end & sector_mask
             if s_start < s_end:
-                self._erase_blocks(self.get_erase_command('sector'),
-                                   self.get_timings('sector'),
+                self._erase_blocks('sector',
                                    s_start, s_end, sector_size)
                 # update the left-hand end marker
                 end = s_start
@@ -369,8 +368,7 @@ class _SpiFlashDevice(SerialFlash):
             hsl_start = (start+sector_size-1) & sector_mask
             hsl_end = end & sector_mask
             if hsl_start < hsl_end:
-                self._erase_blocks(self.get_erase_command('hsector'),
-                                   self.get_timings('hsector'),
+                self._erase_blocks('hsector',
                                    hsl_start, hsl_end, hsector_size)
                 # update the left-hand end marker
                 end = hsl_start
@@ -384,8 +382,7 @@ class _SpiFlashDevice(SerialFlash):
             ssl_start = (start+subsector_size-1) & subsector_mask
             ssl_end = end & subsector_mask
             if ssl_start < ssl_end:
-                self._erase_blocks(self.get_erase_command('subsector'),
-                                   self.get_timings('subsector'),
+                self._erase_blocks('subsector',
                                    ssl_start, ssl_end, subsector_size)
                 # update the right-hand start marker
                 if ssl_end > rstart:
@@ -395,8 +392,7 @@ class _SpiFlashDevice(SerialFlash):
             hsr_start = (rstart+hsector_size-1) & hsector_mask
             hsr_end = rend & hsector_mask
             if hsr_start < hsr_end:
-                self._erase_blocks(self.get_erase_command('hsector'),
-                                   self.get_timings('hsector'),
+                self._erase_blocks('hsector',
                                    hsr_start, hsr_end, hsector_size)
                 # update the right-hand start marker
                 if hsr_end > rstart:
@@ -406,8 +402,7 @@ class _SpiFlashDevice(SerialFlash):
             ssr_start = (rstart+subsector_size-1) & subsector_mask
             ssr_end = rend & subsector_mask
             if ssr_start < ssr_end:
-                self._erase_blocks(self.get_erase_command('subsector'),
-                                   self.get_timings('subsector'),
+                self._erase_blocks('subsector',
                                    ssr_start, ssr_end, subsector_size)
         if verify:
             self._verify_content(address, length, 0xFF)
@@ -482,7 +477,7 @@ class _SpiFlashDevice(SerialFlash):
             time.sleep(typical_time)
             cycle += 1
 
-    def _erase_blocks(self, command: int, times: Tuple[float, float],
+    def _erase_blocks(self, erase_type: str,
                       start: int, end: int, size: int) -> None:
         """Erase one or more blocks."""
         raise NotImplementedError()
@@ -663,9 +658,13 @@ class _Gen25FlashDevice(_SpiFlashDevice):
             self._spi.exchange(wcmd)
             self._wait_for_completion(self.get_timings('page'))
 
-    def _erase_blocks(self, command: int, times: Tuple[float, float],
+    def _erase_blocks(self, erase_type: str,
                       start: int, end: int, size: int) -> None:
         """Erase one or more blocks."""
+
+        times = self.get_timings(erase_type)
+        command = self.get_erase_command(erase_type)
+
         while start < end:
             self._enable_write()
             cmd = bytes((command, (start >> 16) & 0xff,
@@ -931,8 +930,7 @@ class S25FSFlashDevice(_Gen25FlashDevice):
             # subsector erase otherwise these will not be erased
             s_start = parameter_address
             s_end = 8 * self.get_size('subsector')
-            self._erase_blocks(self.get_erase_command('subsector'),
-                                self.get_timings('subsector'),
+            self._erase_blocks('subsector',
                                 s_start, s_end, self.get_size('subsector'))
         
         super(S25FSFlashDevice, self).erase(address, length, verify)
@@ -1429,8 +1427,13 @@ class At45FlashDevice(_SpiFlashDevice):
     def is_busy(self):
         return self._is_busy(self._read_status())
 
-    def _erase_blocks(self, command, times, start, end, size):
+    def _erase_blocks(self, erase_type: str,
+                      start: int, end: int, size: int) -> None:
         """Erase one or more blocks"""
+
+        times = self.get_timings(erase_type)
+        command = self.get_erase_command(erase_type)
+
         while start < end:
             wcmd = bytes((command, (start >> 16) & 0xff,
                           (start >> 8) & 0xff, start & 0xff))
