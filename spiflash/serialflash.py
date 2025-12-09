@@ -286,6 +286,7 @@ class _SpiFlashDevice(SerialFlash):
 
     CMD_READ_LO_SPEED = 0x03  # Read @ low speed
     CMD_READ_HI_SPEED = 0x0B  # Read @ high speed
+    CMD_READ_HI_SPEED_4 = 0x0C # Read @ high speed with 4 byte address
     ADDRESS_WIDTH = 3
 
     def __init__(self, spiport: SpiPort):
@@ -454,9 +455,15 @@ class _SpiFlashDevice(SerialFlash):
         return self._spi.exchange(read_cmd, length)
 
     def _read_hi_speed(self, address: int, length: int) -> bytes:
-        read_cmd = bytes((self.CMD_READ_HI_SPEED,
-                          (address >> 16) & 0xff, (address >> 8) & 0xff,
-                          address & 0xff, 0))
+        fourth_byte = address >> 24
+        if fourth_byte == 0:
+            read_cmd = bytes((self.CMD_READ_HI_SPEED,
+                              (address >> 16) & 0xff, (address >> 8) & 0xff,
+                              address & 0xff, 0))
+        else:
+            read_cmd = bytes((self.CMD_READ_HI_SPEED_4,
+                              fourth_byte, (address >> 16) & 0xff,
+                              (address >> 8) & 0xff, address & 0xff, 0))
         return self._spi.exchange(read_cmd, length)
 
     def _verify_content(self, address: int, length: int, refbyte: int) -> None:
@@ -529,11 +536,14 @@ class _Gen25FlashDevice(_SpiFlashDevice):
     CMD_WRITE_ENABLE = 0x06  # Write enable
     CMD_WRITE_DISABLE = 0x04  # Write disable
     CMD_PROGRAM_PAGE = 0x02  # Write page
+    CMD_PROGRAM_PAGE_4 = 0x12  # Write page with 4 byte address
     CMD_EWSR = 0x50  # Enable write status register
     CMD_WRSR = 0x01  # Write status register
     CMD_ERASE_SUBSECTOR = 0x20
+    CMD_ERASE_SUBSECTOR_4 = 0x21
     CMD_ERASE_HSECTOR = 0x52
     CMD_ERASE_SECTOR = 0xD8
+    CMD_ERASE_SECTOR_4 = 0xDC
     CMD_ERASE_CHIP = 0xC7
 
     def __init__(self, spi: SpiPort):
@@ -651,9 +661,15 @@ class _Gen25FlashDevice(_SpiFlashDevice):
             sequences = [(address, data)]
         for addr, chunk in sequences:
             self._enable_write()
-            wcmd = bytearray((self.CMD_PROGRAM_PAGE,
-                              (addr >> 16) & 0xff, (addr >> 8) & 0xff,
-                              addr & 0xff))
+            fourth_byte = addr >> 24
+            if fourth_byte == 0:
+                wcmd = bytearray((self.CMD_PROGRAM_PAGE,
+                                  (addr >> 16) & 0xff, (addr >> 8) & 0xff,
+                                  addr & 0xff))
+            else:
+                wcmd = bytearray((self.CMD_PROGRAM_PAGE_4,
+                                  fourth_byte, (addr >> 16) & 0xff,
+                                  (addr >> 8) & 0xff, addr & 0xff))
             wcmd.extend(chunk)
             self._spi.exchange(wcmd)
             self._wait_for_completion(self.get_timings('page'))
@@ -663,12 +679,19 @@ class _Gen25FlashDevice(_SpiFlashDevice):
         """Erase one or more blocks."""
 
         times = self.get_timings(erase_type)
-        command = self.get_erase_command(erase_type)
 
         while start < end:
             self._enable_write()
-            cmd = bytes((command, (start >> 16) & 0xff,
-                         (start >> 8) & 0xff, start & 0xff))
+            fourth_byte = start >> 24
+            # only use 4 byte mode if required
+            if fourth_byte == 0:
+                command = self.get_erase_command(erase_type)
+                cmd = bytes((command, (start >> 16) & 0xff,
+                             (start >> 8) & 0xff, start & 0xff))
+            else:
+                command = self.get_erase_command(f'{erase_type}_4')
+                cmd = bytes((command, fourth_byte, (start >> 16) & 0xff,
+                             (start >> 8) & 0xff, start & 0xff))
             self._spi.exchange(cmd)
             self._wait_for_completion(times)
             start += size
